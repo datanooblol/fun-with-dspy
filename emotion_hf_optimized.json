@@ -1,0 +1,32 @@
+{
+  "predict.predict": {
+    "traces": [],
+    "train": [],
+    "demos": [],
+    "signature": {
+      "instructions": "Given the fields `sentence`, produce the fields `emotion`.",
+      "fields": [
+        {
+          "prefix": "Sentence:",
+          "description": "${sentence}"
+        },
+        {
+          "prefix": "Reasoning: Let's think step by step in order to",
+          "description": "${reasoning}"
+        },
+        {
+          "prefix": "Emotion:",
+          "description": "${emotion}"
+        }
+      ]
+    },
+    "lm": null
+  },
+  "metadata": {
+    "dependency_versions": {
+      "python": "3.12",
+      "dspy": "3.1.0",
+      "cloudpickle": "3.1"
+    }
+  }
+}

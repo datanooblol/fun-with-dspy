@@ -1,0 +1,45 @@
+{
+  "prog.predict": {
+    "traces": [],
+    "train": [],
+    "demos": [
+      {
+        "augmented": true,
+        "sentence": "I love this!",
+        "reasoning": "The sentence contains the word \"love\", which is typically associated with positive emotions.",
+        "emotion": "happy"
+      },
+      {
+        "augmented": true,
+        "sentence": "This is terrible.",
+        "reasoning": "The sentence contains the word \"terrible\", which is a strong negative word, indicating a strong negative emotion.",
+        "emotion": "sad"
+      }
+    ],
+    "signature": {
+      "instructions": "Classify the emotion of a sentence.",
+      "fields": [
+        {
+          "prefix": "Sentence:",
+          "description": "${sentence}"
+        },
+        {
+          "prefix": "Reasoning: Let's think step by step in order to",
+          "description": "${reasoning}"
+        },
+        {
+          "prefix": "Emotion:",
+          "description": "happy, sad, or neutral"
+        }
+      ]
+    },
+    "lm": null
+  },
+  "metadata": {
+    "dependency_versions": {
+      "python": "3.12",
+      "dspy": "3.1.0",
+      "cloudpickle": "3.1"
+    }
+  }
+}
