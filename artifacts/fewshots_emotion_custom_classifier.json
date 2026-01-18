@@ -1,18 +1,18 @@
 {
-  "prog.predict": {
+  "program.predict": {
     "traces": [],
     "train": [],
     "demos": [
       {
         "augmented": true,
         "sentence": "I love this!",
-        "reasoning": "The sentence contains the word \"love\", which is typically associated with positive emotions.",
+        "reasoning": "The exclamation mark at the end of the sentence indicates a strong positive emotion, and the word \"love\" is typically associated with affection or fondness.",
         "emotion": "happy"
       },
       {
         "augmented": true,
         "sentence": "This is terrible.",
-        "reasoning": "The sentence contains the word \"terrible\", which is a strong negative word, indicating a strong negative emotion.",
+        "reasoning": "The sentence expresses a strong negative emotion, indicating that the speaker is unhappy or dissatisfied with a situation.",
         "emotion": "sad"
       }
     ],

@@ -1,0 +1,32 @@
+{
+  "program.predict": {
+    "traces": [],
+    "train": [],
+    "demos": [],
+    "signature": {
+      "instructions": "# Instruction for the assistant\n\nGiven a sentence, classify the emotion expressed in the sentence.\n\n### Task Description\n\n*   The input will be a sentence from a natural language text.\n*   The output should be a string representing the emotion expressed in the sentence, chosen from the following list:\n    *   neutral\n    *   happy\n    *   sad\n    *   anger\n    *   disappointment\n    *   joy\n*   The classification should be based on the linguistic features of the sentence, such as the use of emotional language, tone, and context.\n\n### Task Details\n\n*   Consider the context in which the sentence is being used. For example, a sentence in a conversation may express a different emotion than the same sentence in a formal document.\n*   Be aware of the nuances of emotional language. For example, the word \"terrible\" can express sadness or anger, depending on the context.\n*   Use the sentence's linguistic features to guide the classification. For example, the use of exclamation marks or strong adjectives can indicate a stronger emotion.\n*   When in doubt, default to the most likely classification based on the sentence's features.\n\n### Emotional Tone\n\n*   Neutral: The sentence expresses a neutral or factual statement without expressing a strong emotion.\n*   Happy: The sentence expresses a positive emotion, such as joy or excitement.\n*   Sad: The sentence expresses a negative emotion, such as sadness or disappointment.\n*   Anger: The sentence expresses a strong negative emotion, such as anger or frustration.\n*   Disappointment: The sentence expresses a negative emotion, such as disappointment or sadness.\n*   Joy: The sentence expresses a positive emotion, such as happiness or joy.\n\n### Additional Notes\n\n*   The classification should be based on the linguistic features of the sentence, rather than any external knowledge or context.\n*   The output should be a string representing the emotion expressed in the sentence, chosen from the list above.\n*   If the sentence does not express a clear emotion, the output should be \"neutral\".\n*   If the sentence expresses a complex emotion, such as a mix of happy and sad, the output should be the most dominant emotion.\n\n### Example Inputs and Outputs\n\n*   Input: \"The weather is okay.\"\n    Output: \"neutral\"\n*   Input: \"I love this!\"\n    Output: \"happy\"\n*   Input: \"This is terrible.\"\n    Output: \"sad\"",
+      "fields": [
+        {
+          "prefix": "Sentence:",
+          "description": "${sentence}"
+        },
+        {
+          "prefix": "Reasoning: Let's think step by step in order to",
+          "description": "${reasoning}"
+        },
+        {
+          "prefix": "Emotion:",
+          "description": "${emotion}"
+        }
+      ]
+    },
+    "lm": null
+  },
+  "metadata": {
+    "dependency_versions": {
+      "python": "3.12",
+      "dspy": "3.1.0",
+      "cloudpickle": "3.1"
+    }
+  }
+}
