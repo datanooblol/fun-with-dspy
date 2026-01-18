@@ -6,13 +6,13 @@
       {
         "augmented": true,
         "sentence": "I love this!",
-        "reasoning": "The exclamation mark at the end of the sentence indicates a strong positive emotion, and the word \"love\" is typically associated with affection or fondness.",
+        "reasoning": "The use of the exclamation mark and the word \"love\" convey a strong positive sentiment.",
         "emotion": "happy"
       },
       {
         "augmented": true,
         "sentence": "This is terrible.",
-        "reasoning": "The sentence expresses a strong negative emotion, indicating that the speaker is unhappy or dissatisfied with a situation.",
+        "reasoning": "The sentence contains a strong negative word (\"terrible\"), indicating a negative tone.",
         "emotion": "sad"
       }
     ],

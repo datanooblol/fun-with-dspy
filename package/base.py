@@ -206,7 +206,12 @@ class DriverLM(BaseLM):
         
         # Log to history using contract
         history_kwargs = {k: v for k, v in merged_kwargs.items() if k not in ['temperature', 'max_tokens']}
-        self.history.append(self._build_history_entry(prompt, messages, history_kwargs, result))
+        history_entry = self._build_history_entry(prompt, messages, history_kwargs, result)
+        self.history.append(history_entry)
+        
+        # IMPORTANT: Also log to global history for dspy.inspect_history()
+        from dspy.clients.base_lm import GLOBAL_HISTORY
+        GLOBAL_HISTORY.append(history_entry)
         
         return result
 
