@@ -7,76 +7,83 @@ This example includes:
 - An Ollama backend implementation
 """
 
-from typing import Callable, Any
+from typing import Callable, Any, Optional, List
 from dspy.clients.base_lm import BaseLM
 from datetime import datetime
 import uuid as uuid_lib
+from pydantic import BaseModel, Field
 
 
 # ----------------------------------------------------------------------
-# 1. DSPy-Compatible Result Adapter
+# 1. DSPy-Compatible Result Adapter (Pydantic Models)
 # ----------------------------------------------------------------------
 
-class DSPyChoice:
-    def __init__(self, text: str):
-        self.message = type('Message', (), {'content': text, 'role': 'assistant'})()
-        self.finish_reason = "stop"
-        self.index = 0
+class Message(BaseModel):
+    content: str
+    role: str = "assistant"
+
+class Choice(BaseModel):
+    finish_reason: str = "stop"
+    index: int = 0
+    message: Message
     
     def __repr__(self):
-        return f"Choices(finish_reason='{self.finish_reason}', index={self.index}, message=Message(content='{self.message.content}', role='{self.message.role}', tool_calls=None, function_call=None, provider_specific_fields=None, reasoning_content=None))"
+        content_repr = repr(self.message.content)  # Escapes \n
+        return f"Choices(finish_reason='{self.finish_reason}', index={self.index}, message=Message(content={content_repr}, role='{self.message.role}', tool_calls=None, function_call=None, provider_specific_fields=None, reasoning_content=None))"
 
+class Usage(BaseModel):
+    """Usage statistics - populate in output_fn"""
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    total_tokens: int = 0
 
-class DSPyOutputItem:
-    def __init__(self, text: str):
-        self.type = "message"
-        self.content = [type('obj', (), {'text': text})()]
-
-
-class DSPyUsage(dict):
-    """Usage statistics dict - populate manually in output_fn"""
-    def __init__(self, prompt_tokens=0, completion_tokens=0, total_tokens=0):
-        super().__init__()
-        self["prompt_tokens"] = prompt_tokens
-        self["completion_tokens"] = completion_tokens
-        self["total_tokens"] = total_tokens
-
-
-class DSPyResult(dict):
+class ModelResponse(BaseModel):
     """
     ModelResponse-compatible object for DSPy.
     This is the CONTRACT for output_fn - it must return this type.
     
     Usage:
-        def your_output_fn(raw_response: dict) -> DSPyResult:
+        def your_output_fn(raw_response: dict) -> ModelResponse:
             content = extract_content(raw_response)
             model = extract_model(raw_response)
-            usage = DSPyUsage(
+            usage = Usage(
                 prompt_tokens=raw_response.get('prompt_eval_count', 0),
                 completion_tokens=raw_response.get('eval_count', 0),
                 total_tokens=...
             )
-            return DSPyResult(text=content, usage=usage, model=model)
+            return ModelResponse.from_text(text=content, usage=usage, model=model)
     """
-    def __init__(self, text: str, usage: DSPyUsage = None, model: str = "custom"):
-        super().__init__()
-        choice = DSPyChoice(text)
-        self["choices"] = [choice]
-        self.choices = [choice]
-        self.output = [DSPyOutputItem(text)]
-        self.usage = usage or DSPyUsage()
-        self["usage"] = dict(self.usage)  # Store in dict for cache persistence
-        self.model = model
-        self.cache_hit = False
-        
-        # litellm-compatible attributes
-        self.id = f"chatcmpl-{uuid_lib.uuid4()}"
-        self.created = int(datetime.now().timestamp())
-        self.object = "chat.completion"
-        self.system_fingerprint = None
+    model_config = {"arbitrary_types_allowed": True}
+    
+    id: str = Field(default_factory=lambda: f"chatcmpl-{uuid_lib.uuid4()}")
+    created: int = Field(default_factory=lambda: int(datetime.now().timestamp()))
+    model: str = "custom"
+    object: str = "chat.completion"
+    system_fingerprint: Optional[str] = None
+    choices: List[Choice]
+    usage: dict = Field(default_factory=dict)  # Store as dict for cache compatibility
+    cache_hit: bool = False
+    
+    @classmethod
+    def from_text(cls, text: str, usage: Usage = None, model: str = "custom"):
+        """Convenience constructor from text"""
+        message = Message(content=text, role="assistant")
+        choice = Choice(message=message)
+        usage_dict = usage.model_dump() if usage else {}
+        return cls(
+            choices=[choice],
+            usage=usage_dict,
+            model=model
+        )
     
     def __repr__(self):
-        return f"ModelResponse(id='{self.id}', created={self.created}, model='{self.model}', object='{self.object}', system_fingerprint={self.system_fingerprint}, choices={self.choices}, usage={dict(self.usage)}, cache_hit={self.cache_hit})"
+        content = self.choices[0].message.content if self.choices else ""
+        content_repr = repr(content)
+        return f"ModelResponse(id='{self.id}', created={self.created}, model='{self.model}', object='{self.object}', system_fingerprint={self.system_fingerprint}, choices=[Choices(finish_reason='{self.choices[0].finish_reason}', index={self.choices[0].index}, message=Message(content={content_repr}, role='{self.choices[0].message.role}', tool_calls=None, function_call=None, provider_specific_fields=None, reasoning_content=None))], usage={self.usage}, cache_hit={self.cache_hit})"
+
+# Backwards compatibility
+DSPyResult = ModelResponse
+DSPyUsage = Usage
 
 
 # ----------------------------------------------------------------------
@@ -108,12 +115,23 @@ class DriverLM(BaseLM):
         self.output_fn = output_fn
         self._setup_cached_forward()
     
+    def clear_cache(self):
+        """Clear the request cache and recreate cached function"""
+        if hasattr(self._cached_forward, 'cache_clear'):
+            self._cached_forward.cache_clear()
+        # Recreate the cached function to ensure clean state
+        self._setup_cached_forward()
+    
     def _setup_cached_forward(self):
         """Setup cached forward function once during init"""
         from dspy.clients.cache import request_cache
+        import functools
         
-        @request_cache(cache_arg_name="request", ignored_args_for_cache_key=["api_key", "api_base", "base_url"])
-        def cached_forward(request: dict):
+        # Track if function actually executed
+        self._last_call_was_cached = False
+        
+        def uncached_forward(request: dict):
+            self._last_call_was_cached = False  # Mark as fresh call
             raw_result = self.request_fn(
                 prompt=request.get("prompt"),
                 messages=request.get("messages"),
@@ -121,23 +139,24 @@ class DriverLM(BaseLM):
                 max_tokens=request.get("max_tokens", 256),
             )
             result = self.output_fn(raw_result)
-            result.cache_hit = True
             return result
         
-        self._cached_forward = cached_forward
+        # Apply cache decorator
+        cached_fn = request_cache(cache_arg_name="request", ignored_args_for_cache_key=["api_key", "api_base", "base_url"])(uncached_forward)
+        
+        # Store both versions
+        self._uncached_forward = uncached_forward
+        self._cached_forward = cached_fn
     
     def _build_history_entry(self, prompt, messages, kwargs, result):
         """Build history entry following native dspy.LM contract"""
-        # Get usage from dict (survives cache) or attribute (fresh result)
-        usage_dict = result.get("usage", {}) or dict(result.usage) if hasattr(result, 'usage') else {}
-        
         return {
             "prompt": prompt,
             "messages": messages,
             "kwargs": kwargs,
             "response": result,
             "outputs": [result.choices[0].message.content],
-            "usage": usage_dict,
+            "usage": result.usage,
             "cost": 0.0,
             "timestamp": datetime.now().isoformat(),
             "uuid": str(uuid_lib.uuid4()),
@@ -146,7 +165,7 @@ class DriverLM(BaseLM):
             "model_type": self.model_type,
         }
 
-    def __call__(self, prompt=None, messages=None, **kwargs):
+    def __call__(self, prompt:str|None=None, messages:list[dict[str,Any]]|None=None, **kwargs)->List[dict[str, Any] | str]:
         """Allow calling the LM directly like native_lm('Hi')"""
         result = self.forward(prompt=prompt, messages=messages, **kwargs)
         # Return list of outputs like native dspy.LM
@@ -171,7 +190,10 @@ class DriverLM(BaseLM):
         )
         
         if cache:
+            self._last_call_was_cached = True  # Assume cached
             result = self._cached_forward(request=request)
+            # If function executed, _last_call_was_cached is now False
+            result.cache_hit = self._last_call_was_cached
         else:
             raw_result = self.request_fn(
                 prompt=prompt,
@@ -180,6 +202,7 @@ class DriverLM(BaseLM):
                 max_tokens=merged_kwargs.get("max_tokens", 256),
             )
             result = self.output_fn(raw_result)
+            result.cache_hit = False
         
         # Log to history using contract
         history_kwargs = {k: v for k, v in merged_kwargs.items() if k not in ['temperature', 'max_tokens']}
