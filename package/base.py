@@ -9,6 +9,8 @@ This example includes:
 
 from typing import Callable, Any
 from dspy.clients.base_lm import BaseLM
+from datetime import datetime
+import uuid as uuid_lib
 
 
 # ----------------------------------------------------------------------
@@ -17,8 +19,12 @@ from dspy.clients.base_lm import BaseLM
 
 class DSPyChoice:
     def __init__(self, text: str):
-        self.message = type('obj', (), {'content': text})()
+        self.message = type('Message', (), {'content': text, 'role': 'assistant'})()
         self.finish_reason = "stop"
+        self.index = 0
+    
+    def __repr__(self):
+        return f"Choices(finish_reason='{self.finish_reason}', index={self.index}, message=Message(content='{self.message.content}', role='{self.message.role}', tool_calls=None, function_call=None, provider_specific_fields=None, reasoning_content=None))"
 
 
 class DSPyOutputItem:
@@ -28,26 +34,49 @@ class DSPyOutputItem:
 
 
 class DSPyUsage(dict):
-    def __init__(self):
+    """Usage statistics dict - populate manually in output_fn"""
+    def __init__(self, prompt_tokens=0, completion_tokens=0, total_tokens=0):
         super().__init__()
-        self["prompt_tokens"] = 0
-        self["completion_tokens"] = 0
-        self["total_tokens"] = 0
+        self["prompt_tokens"] = prompt_tokens
+        self["completion_tokens"] = completion_tokens
+        self["total_tokens"] = total_tokens
 
 
 class DSPyResult(dict):
     """
-    Minimal OpenAI-like response object that DSPy expects.
+    ModelResponse-compatible object for DSPy.
+    This is the CONTRACT for output_fn - it must return this type.
+    
+    Usage:
+        def your_output_fn(raw_response: dict) -> DSPyResult:
+            content = extract_content(raw_response)
+            model = extract_model(raw_response)
+            usage = DSPyUsage(
+                prompt_tokens=raw_response.get('prompt_eval_count', 0),
+                completion_tokens=raw_response.get('eval_count', 0),
+                total_tokens=...
+            )
+            return DSPyResult(text=content, usage=usage, model=model)
     """
-    def __init__(self, text: str):
+    def __init__(self, text: str, usage: DSPyUsage = None, model: str = "custom"):
         super().__init__()
         choice = DSPyChoice(text)
         self["choices"] = [choice]
         self.choices = [choice]
         self.output = [DSPyOutputItem(text)]
-        self.usage = DSPyUsage()
-        self.model = "custom"
+        self.usage = usage or DSPyUsage()
+        self["usage"] = dict(self.usage)  # Store in dict for cache persistence
+        self.model = model
         self.cache_hit = False
+        
+        # litellm-compatible attributes
+        self.id = f"chatcmpl-{uuid_lib.uuid4()}"
+        self.created = int(datetime.now().timestamp())
+        self.object = "chat.completion"
+        self.system_fingerprint = None
+    
+    def __repr__(self):
+        return f"ModelResponse(id='{self.id}', created={self.created}, model='{self.model}', object='{self.object}', system_fingerprint={self.system_fingerprint}, choices={self.choices}, usage={dict(self.usage)}, cache_hit={self.cache_hit})"
 
 
 # ----------------------------------------------------------------------
@@ -91,10 +120,38 @@ class DriverLM(BaseLM):
                 temperature=request.get("temperature", 0.7),
                 max_tokens=request.get("max_tokens", 256),
             )
-            return self.output_fn(raw_result)
+            result = self.output_fn(raw_result)
+            result.cache_hit = True
+            return result
         
         self._cached_forward = cached_forward
+    
+    def _build_history_entry(self, prompt, messages, kwargs, result):
+        """Build history entry following native dspy.LM contract"""
+        # Get usage from dict (survives cache) or attribute (fresh result)
+        usage_dict = result.get("usage", {}) or dict(result.usage) if hasattr(result, 'usage') else {}
+        
+        return {
+            "prompt": prompt,
+            "messages": messages,
+            "kwargs": kwargs,
+            "response": result,
+            "outputs": [result.choices[0].message.content],
+            "usage": usage_dict,
+            "cost": 0.0,
+            "timestamp": datetime.now().isoformat(),
+            "uuid": str(uuid_lib.uuid4()),
+            "model": result.model,
+            "response_model": result.model,
+            "model_type": self.model_type,
+        }
 
+    def __call__(self, prompt=None, messages=None, **kwargs):
+        """Allow calling the LM directly like native_lm('Hi')"""
+        result = self.forward(prompt=prompt, messages=messages, **kwargs)
+        # Return list of outputs like native dspy.LM
+        return [result.choices[0].message.content]
+    
     def forward(
         self,
         prompt: str | None = None,
@@ -114,7 +171,7 @@ class DriverLM(BaseLM):
         )
         
         if cache:
-            return self._cached_forward(request=request)
+            result = self._cached_forward(request=request)
         else:
             raw_result = self.request_fn(
                 prompt=prompt,
@@ -122,7 +179,13 @@ class DriverLM(BaseLM):
                 temperature=merged_kwargs.get("temperature", 0.7),
                 max_tokens=merged_kwargs.get("max_tokens", 256),
             )
-            return self.output_fn(raw_result)
+            result = self.output_fn(raw_result)
+        
+        # Log to history using contract
+        history_kwargs = {k: v for k, v in merged_kwargs.items() if k not in ['temperature', 'max_tokens']}
+        self.history.append(self._build_history_entry(prompt, messages, history_kwargs, result))
+        
+        return result
 
     async def aforward(self, *args, **kwargs):
         # Simple sync-to-async bridge
