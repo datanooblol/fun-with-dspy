@@ -113,6 +113,171 @@ class MyClass(metaclass=MyMeta):  # type(MyClass) = MyMeta
 obj = MyClass()       # type(obj) = MyClass
 ```
 
+### What is `namespace`?
+
+**`namespace` is just a dictionary** that contains everything you define in a class.
+
+#### Simple Example
+
+```python
+class MyClass:
+    x = 10
+    y = "hello"
+    
+    def method(self):
+        pass
+```
+
+Python internally creates:
+```python
+namespace = {
+    'x': 10,
+    'y': "hello",
+    'method': <function method>,
+    '__module__': '__main__',
+    '__qualname__': 'MyClass',
+}
+```
+
+Then calls: `MyClass = type('MyClass', (), namespace)`
+
+#### With Type Annotations
+
+```python
+class MyClass:
+    x: int = 10
+    y: str = "hello"
+```
+
+Namespace becomes:
+```python
+namespace = {
+    'x': 10,
+    'y': "hello",
+    '__annotations__': {'x': int, 'y': str},  # Stored separately!
+}
+```
+
+**CRITICAL**: Type annotations are stored in `__annotations__`, separate from the actual values.
+
+#### In Our Signature Example
+
+```python
+class Calculator(Signature):
+    """Solve math."""
+    result: int = InputField(desc="The result")
+```
+
+**Step 1**: Python builds namespace:
+```python
+namespace = {
+    '__doc__': "Solve math.",
+    '__annotations__': {'result': int},           # Type annotation
+    'result': FieldInfo(name="", type=str, ...),  # Field value (default type=str)
+}
+```
+
+**Step 2**: Metaclass receives and modifies namespace:
+```python
+def __new__(mcs, name, bases, namespace, **kwargs):
+    annotations = namespace.get('__annotations__', {})  # {'result': int}
+    
+    for field_name, field_value in namespace.items():
+        if field_name == 'result':
+            # Extract type from annotation
+            field_value.type = annotations['result']  # Change str to int!
+            
+            # Move to _input_fields
+            input_fields['result'] = field_value
+            
+            # Remove from namespace
+            del namespace['result']
+    
+    # Add processed fields
+    namespace['_input_fields'] = input_fields
+```
+
+**Step 3**: Final namespace becomes class attributes:
+```python
+Calculator.result        # AttributeError (deleted from namespace)
+Calculator._input_fields # {'result': FieldInfo(type=int, ...)} (added to namespace)
+```
+
+### Visual Flow: Namespace Transformation
+
+```
+┌─────────────────────────────────────┐
+│ namespace (before metaclass)        │
+├─────────────────────────────────────┤
+│ __doc__: "Solve math."              │
+│ __annotations__: {'result': int}    │
+│ result: FieldInfo(type=str, ...)    │
+└─────────────────────────────────────┘
+           ↓ Metaclass processes
+┌─────────────────────────────────────┐
+│ namespace (after metaclass)         │
+├─────────────────────────────────────┤
+│ __doc__: "Solve math."              │
+│ _input_fields: {'result': ...}      │
+│ _output_fields: {}                  │
+│ _instructions: "Solve math."        │
+│ (result deleted)                    │
+└─────────────────────────────────────┘
+           ↓ type.__new__()
+┌─────────────────────────────────────┐
+│ Calculator class                    │
+├─────────────────────────────────────┤
+│ Calculator._input_fields            │
+│ Calculator._output_fields           │
+│ Calculator._instructions            │
+│ (Calculator.result doesn't exist)   │
+└─────────────────────────────────────┘
+```
+
+### Why Manipulate Namespace?
+
+**Problem**: We don't want `Calculator.result` to be a `FieldInfo` object.
+
+**Solution**: 
+1. Extract the `FieldInfo` from namespace
+2. Store it in `_input_fields` dictionary
+3. Delete the original attribute
+4. Add `_input_fields` to namespace
+
+**Result**: Clean API where fields are accessed via `Calculator.input_fields`, not `Calculator.result`.
+
+### Key Namespace Operations
+
+```python
+def __new__(mcs, name, bases, namespace, **kwargs):
+    # READ from namespace
+    annotations = namespace.get('__annotations__', {})
+    doc = namespace.get('__doc__', '')
+    
+    # ITERATE namespace
+    for field_name, field_value in list(namespace.items()):
+        if isinstance(field_value, FieldInfo):
+            # MODIFY field
+            field_value.name = field_name
+            
+            # DELETE from namespace
+            del namespace[field_name]
+    
+    # ADD to namespace
+    namespace['_input_fields'] = input_fields
+    namespace['_output_fields'] = output_fields
+    
+    return super().__new__(mcs, name, bases, namespace)
+```
+
+### Critical Insights
+
+1. **`namespace` is just a dict** - Contains all class attributes
+2. **`__annotations__` is separate** - Type hints stored independently from values
+3. **Metaclass can modify namespace** - Add, delete, or change any attribute
+4. **Final namespace becomes the class** - Whatever's in namespace after `__new__` becomes class attributes
+5. **This enables the "magic"** - Transform declarative syntax into processed data structures
+
 ### When Does a Metaclass Run?
 
 **CRITICAL**: The metaclass runs **when the class is defined**, NOT when instances are created.
